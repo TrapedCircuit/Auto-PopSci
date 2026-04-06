@@ -3,16 +3,17 @@ Auto Pop-Sci build pipeline -- TEMPLATE.
 
 Replace all {{PLACEHOLDERS}} with your topic-specific values.
 
-Phases:
-  1. Generate TTS per subtitle segment
-  2. Render Manim scenes (writes timestamps.json)
-  3. Build per-scene audio from timestamps
-  4. Concatenate into final video
+Pipeline:
+  1. Generate TTS per subtitle segment → timing.json
+  2. Render Manim scenes (silent) → timestamps.json
+  3. Concat silent videos into one full video
+  4. ONE-PASS audio merge: place ALL segments at absolute timestamps
   5. Generate SRT subtitles
 """
 
 import asyncio
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -26,15 +27,12 @@ VIDEO_DIR = MEDIA / "videos" / "main" / "1080p60"
 
 VOICE = "{{VOICE}}"  # e.g. "zh-CN-YunxiNeural", "en-US-GuyNeural"
 
-# Scene render order -- must match class names in main.py
 SCENE_ORDER = [
     # "S01_HookScene",
     # "S02_TitleScene",
     # ... add all scene class names here
 ]
 
-# TTS narration text per segment.
-# CRITICAL: len(SCENE_SEGMENTS[scene]) MUST == number of show_sub() calls in that scene.
 SCENE_SEGMENTS = {
     # "S01_HookScene": [
     #     "First narration segment spoken by TTS.",
@@ -42,7 +40,6 @@ SCENE_SEGMENTS = {
     # ],
 }
 
-# Short display text for SRT subtitles (can differ from TTS text).
 SRT_DISPLAY = {
     # "S01_HookScene": [
     #     "First subtitle line",
@@ -62,8 +59,6 @@ def get_duration(path) -> float:
 
 
 def verify_segments():
-    """Verify segment counts match show_sub counts. Exits on mismatch."""
-    import re
     print("=== Verify segment counts ===")
     with open(ROOT / "animation" / "main.py") as f:
         code = f.read()
@@ -78,15 +73,13 @@ def verify_segments():
             ok = False
         print(f"  {scene}: {n_seg} segments, {n_sub} show_sub -- {status}")
     if not ok:
-        print("  ERROR: Fix mismatches before building!")
-        raise SystemExit(1)
+        raise SystemExit("Fix mismatches before building!")
     print()
 
 
 async def phase1_generate_tts():
-    print("=== Phase 1: Generate TTS per segment ===")
+    print("=== Phase 1: Generate TTS ===")
     SEG_DIR.mkdir(parents=True, exist_ok=True)
-
     for scene in SCENE_ORDER:
         for i, text in enumerate(SCENE_SEGMENTS[scene]):
             out = SEG_DIR / f"{scene}_{i:02d}.mp3"
@@ -94,123 +87,129 @@ async def phase1_generate_tts():
                 comm = edge_tts.Communicate(text, VOICE, rate="-5%", pitch="+0Hz")
                 await comm.save(str(out))
                 print(f"    {out.name}")
-
     timing = {}
     for scene in SCENE_ORDER:
-        durs = []
-        for i in range(len(SCENE_SEGMENTS[scene])):
-            f = SEG_DIR / f"{scene}_{i:02d}.mp3"
-            durs.append(round(get_duration(f), 3))
+        durs = [round(get_duration(SEG_DIR / f"{scene}_{i:02d}.mp3"), 3)
+                for i in range(len(SCENE_SEGMENTS[scene]))]
         timing[scene] = durs
         print(f"  {scene}: {len(durs)} segs, {sum(durs):.1f}s")
-
     (MEDIA / "timing.json").write_text(json.dumps(timing, indent=2))
     return timing
 
 
 def phase2_render_manim():
-    print("\n=== Phase 2: Render Manim scenes ===")
+    print("\n=== Phase 2: Render Manim (silent) ===")
     scenes = " ".join(SCENE_ORDER)
     subprocess.run(
         f"cd {ROOT} && uv run manim render -qh animation/main.py {scenes}",
         shell=True, capture_output=True)
     for s in SCENE_ORDER:
         p = VIDEO_DIR / f"{s}.mp4"
-        d = get_duration(p) if p.exists() else 0
-        print(f"  {s}: {d:.1f}s")
+        print(f"  {s}: {get_duration(p):.1f}s" if p.exists() else f"  {s}: MISSING!")
 
 
-def phase3_build_audio():
-    print("\n=== Phase 3: Build audio tracks ===")
-    stamps_path = MEDIA / "timestamps.json"
-    if not stamps_path.exists():
-        print("  ERROR: timestamps.json not found")
-        return
-    stamps = json.loads(stamps_path.read_text())
+def phase3_concat_silent():
+    """Concat all silent scene videos into one full video (video-only)."""
+    print("\n=== Phase 3: Concat silent videos ===")
     FINAL_DIR.mkdir(parents=True, exist_ok=True)
-
-    for scene in SCENE_ORDER:
-        if scene not in stamps:
-            print(f"  SKIP {scene}: no timestamps")
-            continue
-        ts_list = stamps[scene]
-        n_segs = len(SCENE_SEGMENTS[scene])
-        vid_path = VIDEO_DIR / f"{scene}.mp4"
-        vid_dur = get_duration(vid_path) if vid_path.exists() else 60
-        n_actual = min(n_segs, len(ts_list))
-        if n_actual == 0:
-            continue
-
-        cmd = ["ffmpeg", "-y", "-i", str(vid_path)]
-        for i in range(n_actual):
-            cmd.extend(["-i", str(SEG_DIR / f"{scene}_{i:02d}.mp3")])
-
-        filter_parts = []
-        for i in range(n_actual):
-            delay_ms = int(ts_list[i] * 1000)
-            filter_parts.append(f"[{i+1}:a]adelay={delay_ms}|{delay_ms}[d{i}]")
-
-        mix_labels = "".join(f"[d{i}]" for i in range(n_actual))
-        filter_parts.append(
-            f"{mix_labels}amix=inputs={n_actual}:duration=longest"
-            f":dropout_transition=0,volume={n_actual}[aout]"
-        )
-
-        out_path = FINAL_DIR / f"{scene}.mp4"
-        cmd.extend([
-            "-filter_complex", ";".join(filter_parts),
-            "-map", "0:v", "-map", "[aout]",
-            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-            "-t", str(vid_dur), str(out_path),
-        ])
-
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode != 0:
-            print(f"  ERROR {scene}: {r.stderr[-300:]}")
-        else:
-            print(f"  {scene}: {n_actual} segments merged")
-
-
-def phase4_concatenate():
-    print("\n=== Phase 4: Concatenate ===")
     concat = FINAL_DIR / "concat.txt"
-    lines = []
-    for s in SCENE_ORDER:
-        p = FINAL_DIR / f"{s}.mp4"
-        if p.exists():
-            lines.append(f"file '{p}'")
+    lines = [f"file '{VIDEO_DIR / f'{s}.mp4'}'" for s in SCENE_ORDER
+             if (VIDEO_DIR / f"{s}.mp4").exists()]
     concat.write_text("\n".join(lines))
 
-    output = FINAL_DIR / "output_full.mp4"
+    silent = FINAL_DIR / "silent_full.mp4"
     subprocess.run([
         "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-        "-i", str(concat), "-c", "copy", str(output),
+        "-i", str(concat), "-c", "copy", "-an", str(silent),
     ], capture_output=True)
-    dur = get_duration(output)
-    print(f"  Final: {output} ({dur:.1f}s / {dur/60:.1f} min)")
+    dur = get_duration(silent)
+    print(f"  Silent video: {dur:.1f}s")
+    return silent, dur
+
+
+def phase4_merge_audio(silent_path):
+    """Place ALL audio segments at absolute timestamps in one ffmpeg call."""
+    print("\n=== Phase 4: One-pass audio merge ===")
+    stamps = json.loads((MEDIA / "timestamps.json").read_text())
+
+    # Calculate absolute timestamp for each segment
+    scene_offsets = {}
+    cumulative = 0.0
+    for s in SCENE_ORDER:
+        scene_offsets[s] = cumulative
+        p = VIDEO_DIR / f"{s}.mp4"
+        if p.exists():
+            cumulative += get_duration(p)
+
+    # Collect all segments with absolute timestamps
+    all_segments = []  # (absolute_time_ms, audio_file_path)
+    for scene in SCENE_ORDER:
+        if scene not in stamps:
+            continue
+        base = scene_offsets[scene]
+        for i, local_t in enumerate(stamps[scene]):
+            seg_file = SEG_DIR / f"{scene}_{i:02d}.mp3"
+            if seg_file.exists():
+                abs_ms = int((base + local_t) * 1000)
+                all_segments.append((abs_ms, str(seg_file)))
+
+    n = len(all_segments)
+    print(f"  Placing {n} audio segments on full timeline")
+
+    # Build ffmpeg command: silent video + all audio segments
+    cmd = ["ffmpeg", "-y", "-i", str(silent_path)]
+    for _, path in all_segments:
+        cmd.extend(["-i", path])
+
+    # Filter: adelay each segment to its absolute position, then amix all
+    filter_parts = []
+    for i, (delay_ms, _) in enumerate(all_segments):
+        filter_parts.append(f"[{i+1}:a]adelay={delay_ms}|{delay_ms}[d{i}]")
+
+    mix_labels = "".join(f"[d{i}]" for i in range(n))
+    filter_parts.append(
+        f"{mix_labels}amix=inputs={n}:duration=longest"
+        f":dropout_transition=0,volume={n}[aout]"
+    )
+
+    output = FINAL_DIR / "output_full.mp4"
+    cmd.extend([
+        "-filter_complex", ";".join(filter_parts),
+        "-map", "0:v", "-map", "[aout]",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+        str(output),
+    ])
+
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"  ERROR: {r.stderr[-500:]}")
+    else:
+        dur = get_duration(output)
+        print(f"  Final: {output} ({dur:.1f}s / {dur/60:.1f} min)")
 
 
 def phase5_generate_srt():
     print("\n=== Phase 5: Generate SRT ===")
     stamps = json.loads((MEDIA / "timestamps.json").read_text())
     timing = json.loads((MEDIA / "timing.json").read_text())
-    srt_lines = []
-    idx = 1
-    cumulative = 0.0
+
     scene_offsets = {}
+    cumulative = 0.0
     for s in SCENE_ORDER:
         scene_offsets[s] = cumulative
-        p = FINAL_DIR / f"{s}.mp4"
+        p = VIDEO_DIR / f"{s}.mp4"
         if p.exists():
             cumulative += get_duration(p)
 
+    srt_lines = []
+    idx = 1
     for scene in SCENE_ORDER:
         if scene not in stamps:
             continue
         ts_list = stamps[scene]
         durs = timing.get(scene, [])
         display = SRT_DISPLAY.get(scene, [])
-        base = scene_offsets.get(scene, 0)
+        base = scene_offsets[scene]
         for i in range(min(len(ts_list), len(display), len(durs))):
             start = base + ts_list[i]
             end = start + durs[i] - 0.1
@@ -232,8 +231,8 @@ async def main():
     verify_segments()
     await phase1_generate_tts()
     phase2_render_manim()
-    phase3_build_audio()
-    phase4_concatenate()
+    silent, _ = phase3_concat_silent()
+    phase4_merge_audio(silent)
     phase5_generate_srt()
     print("\n=== Done! ===")
 
