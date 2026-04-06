@@ -39,6 +39,7 @@ ACCENT = "#f1c40f"
 MUTED = "#7f8c8d"
 CARD_BG = "#16213e"
 SUB_BOX_CLR = "#0d0d1a"
+SHOW_SUBTITLES = False
 
 import platform as _platform
 _sys = _platform.system()
@@ -88,42 +89,41 @@ class SubtitleMixin:
 
     def show_sub(self, text: str, *, font_size: int = 26):
         """
-        Show subtitle and mark the start of a narration segment.
+        Mark the start of a narration segment and (optionally) show subtitle.
         Does NOT block -- animations after this call play DURING the narration.
         Call pad_segment() when animations are done to fill remaining time.
+        Set SHOW_SUBTITLES = True in base.py to render subtitle bar on screen.
         """
-        # Pad previous segment if caller forgot
         if self._seg_dur > 0:
             self.pad_segment()
 
         tts_dur = self._get_seg_duration()
         self._log_timestamp()
 
-        # Build subtitle visual
-        new_txt = Text(
-            text, font=FONT, font_size=font_size, color=WHITE, line_spacing=1.4,
-        )
-        if new_txt.width > 12:
-            new_txt.width = 12
-        box = RoundedRectangle(
-            width=config.frame_width - 0.6,
-            height=new_txt.height + 0.45,
-            corner_radius=0.12,
-            fill_color=SUB_BOX_CLR, fill_opacity=0.82,
-            stroke_width=0,
-        )
-        box.to_edge(DOWN, buff=0.22)
-        new_txt.move_to(box)
-        grp = VGroup(box, new_txt)
+        if SHOW_SUBTITLES:
+            new_txt = Text(
+                text, font=FONT, font_size=font_size, color=WHITE, line_spacing=1.4,
+            )
+            if new_txt.width > 12:
+                new_txt.width = 12
+            box = RoundedRectangle(
+                width=config.frame_width - 0.6,
+                height=new_txt.height + 0.45,
+                corner_radius=0.12,
+                fill_color=SUB_BOX_CLR, fill_opacity=0.82,
+                stroke_width=0,
+            )
+            box.to_edge(DOWN, buff=0.22)
+            new_txt.move_to(box)
+            grp = VGroup(box, new_txt)
 
-        anims = []
-        if self._sub_group is not None:
-            anims.append(FadeOut(self._sub_group, run_time=0.3))
-        anims.append(FadeIn(grp, run_time=0.4))
-        self.play(*anims)
-        self._sub_group = grp
+            anims = []
+            if self._sub_group is not None:
+                anims.append(FadeOut(self._sub_group, run_time=0.3))
+            anims.append(FadeIn(grp, run_time=0.4))
+            self.play(*anims)
+            self._sub_group = grp
 
-        # Record segment timing for pad_segment
         self._seg_start = self.renderer.time
         if tts_dur > 0:
             self._seg_dur = tts_dur
@@ -144,7 +144,7 @@ class SubtitleMixin:
         self._seg_dur = 0
 
     def hide_sub(self):
-        if self._sub_group is not None:
+        if SHOW_SUBTITLES and self._sub_group is not None:
             self.play(FadeOut(self._sub_group, run_time=0.3))
             self._sub_group = None
 

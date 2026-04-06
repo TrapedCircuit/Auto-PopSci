@@ -90,6 +90,36 @@ Next paragraph.
 [ANIM: next animation]
 ```
 
+### Phase 2.5 -- Self-Review Harness (MANDATORY)
+
+Before implementing animations, review the plan and script as if you were a
+**high-school student seeing this topic for the first time**. Apply these checks:
+
+#### Clarity checklist
+
+1. **Concrete before abstract**: Every formula must be preceded by a concrete
+   numerical example. Never show `a·s + e = b` without first showing
+   `2×3 + 5×1 + 1 = 12` with step-by-step highlighting.
+2. **One idea per segment**: Each `show_sub()` should introduce exactly one
+   concept. If you need two sentences to explain, split into two segments.
+3. **Visual anchors**: Every abstract statement needs a visual counterpart.
+   "Noise destroys solvability" → show the Gaussian elimination failing
+   with actual numbers side-by-side.
+4. **Step-by-step derivation**: For any math derivation, show each algebraic
+   step on its own line, animating with `Write()` progressively. Use
+   `TransformMatchingTex` for equation transitions (like 3Blue1Brown).
+5. **Spatial intuition**: For geometric/algebraic topics, include at least one
+   scene with 3D-like visualization (see "3D Visualization" section below).
+
+#### Review questions (answer each before proceeding to Phase 3)
+
+- "Would a 16-year-old understand *why* this step follows from the previous one?"
+- "Is there any formula shown without a concrete worked example first?"
+- "Can I point to the exact animation that makes the key insight *click*?"
+- "Does the video build intuition progressively, or does it jump to conclusions?"
+
+If any answer is "no", revise the script and plan before implementing.
+
 ### Phase 3 -- Implement Manim scenes (animation/main.py)
 
 ```python
@@ -157,6 +187,18 @@ concat) caused AAC frame discontinuities at scene boundaries, producing
 audible pops and silence gaps. The new approach creates a single continuous
 audio track in one ffmpeg call -- zero boundary artifacts.
 
+### Build pipeline rules
+
+1. **Render all scenes in ONE manim process** -- `_STAMPS` dict accumulates
+   across scenes; per-scene rendering breaks timestamp continuity.
+2. **Add TTS retry logic** -- edge-tts can hit transient network errors;
+   retry up to 3 times with backoff.
+3. **Set `PYTHONUNBUFFERED=1`** -- so build progress is visible in real-time.
+4. **Add `timeout=600`** to subprocess calls -- prevents hung renders from
+   blocking the pipeline forever.
+5. **Never use `capture_output=True` alone** -- always use `text=True` and
+   log stderr on failure for debugging.
+
 ## Audio-Video Sync Rules (MANDATORY)
 
 1. **NEVER use Manim's `add_sound()`** -- it drops audio clips silently
@@ -167,6 +209,12 @@ audio track in one ffmpeg call -- zero boundary artifacts.
 5. **Segment count must match** -- mismatches = desync. `verify_segments()` checks this
 
 ## Style Guide (3Blue1Brown)
+
+### Subtitles
+
+Subtitles are **off by default** (`SHOW_SUBTITLES = False` in `base.py`).
+The SRT file is always generated for external subtitle use.
+To enable on-screen subtitle bars, set `SHOW_SUBTITLES = True` in `base.py`.
 
 ### Colors
 - Background: `#1a1a2e`, Card bg: `#16213e`, Subtitle bg: `#0d0d1a`
@@ -193,11 +241,97 @@ audio track in one ffmpeg call -- zero boundary artifacts.
 - Unit circle: `TracedPath` + `always_redraw` for cos/sin projection lines
 - Final reveal: double frame (inner solid + outer faint)
 
+### Step-by-step math derivations (3Blue1Brown style)
+
+The single most important quality signal. Every derivation must be animated
+progressively, never shown as a complete block.
+
+```python
+# GOOD: step-by-step with progressive reveal
+step1 = MathTex(r"2x + 5y", "=", "11", font_size=30)
+self.play(Write(step1, run_time=0.5))
+
+step2 = MathTex(r"y = 13 - 4x", font_size=26)
+step2.next_to(step1, DOWN, aligned_edge=LEFT, buff=0.3)
+self.play(Write(step2, run_time=0.4))
+
+step3 = MathTex(r"x = 3", font_size=30, color=OK_CLR)
+step3.next_to(step2, DOWN, buff=0.3)
+box = SurroundingRectangle(step3, corner_radius=0.08, color=OK_CLR)
+self.play(Write(step3), Create(box))
+
+# BAD: showing complete derivation at once
+full = MathTex(r"2x+5y=11 \Rightarrow y=13-4x \Rightarrow x=3")
+self.play(Write(full))  # student has no time to follow!
+```
+
+For equation transformations, use `TransformMatchingTex`:
+```python
+eq1 = MathTex(r"e^{i\pi}", "=", r"\cos\pi", "+", r"i\sin\pi")
+eq2 = MathTex(r"e^{i\pi}", "=", "(-1)", "+", r"i \cdot 0")
+self.play(TransformMatchingTex(eq1, eq2), run_time=1)
+```
+
+### Concrete numerical examples
+
+For any abstract formula, **always precede it with a worked example**.
+
+```python
+# Show the concrete computation FIRST
+self.show_sub("Let's compute a·s step by step")
+a_label = MathTex(r"\vec{a} = (2, 5)", color=LATTICE_CLR)
+s_label = MathTex(r"\vec{s} = (3, 1)", color=ACCENT)
+comp = MathTex("2", r"\times", "3", "+", "5", r"\times", "1", "=", "11")
+# ... animate each part progressively ...
+
+# THEN show the general formula
+self.show_sub("In general, we compute the inner product")
+formula = MathTex(r"\vec{a} \cdot \vec{s} + e = b")
+```
+
+### 3D visualization
+
+For topics with spatial structure (lattices, vector spaces, manifolds), include
+at least one scene with 3D-like visualization.
+
+**NEVER use `ThreeDScene` with `Dot3D`/`Sphere`** -- Cairo renders each sphere
+as a parametric surface; 50+ spheres can OOM or hang for minutes.
+
+Instead, use **oblique projection** in a regular `Scene`:
+
+```python
+def _proj(x, y, z, phi=0.55, theta=-0.7):
+    """Project 3D point to 2D screen coordinates."""
+    cp, sp = np.cos(phi), np.sin(phi)
+    ct, st = np.cos(theta), np.sin(theta)
+    sx = x * ct - y * st
+    sy = x * st * sp + y * ct * sp + z * cp
+    return np.array([sx * 0.65, sy * 0.65, 0])
+
+# Use regular Dots (fast!) at projected positions
+pts = VGroup(*[
+    Dot(_proj(i, j, k), radius=0.05, color=LATTICE_CLR)
+    for i in range(-2, 3) for j in range(-2, 3) for k in range(-1, 2)
+])
+
+# "Rotate" by transforming to a different projection angle
+new_pts = VGroup(*[
+    Dot(_proj(i, j, k, phi=0.45, theta=-1.2), ...)
+    for i, j, k in ...
+])
+self.play(Transform(pts, new_pts, run_time=2))
+```
+
+This renders 100x faster than `ThreeDScene` and produces clean, 3Blue1Brown-style visuals.
+
 ### Things to AVOID
 - `letter_spacing` parameter in `Text()` -- Manim does not support it
 - Raw `\text{}` in `MathTex` for Chinese -- use separate `Text()` objects
 - Overly long `run_time` on `Write()` -- keep under 2.5s for readability
 - Plain text-only scenes -- always add at least one visual element
+- `ThreeDScene` + `Dot3D`/`Sphere` for many points -- use `_proj()` instead
+- Showing formulas without a preceding concrete numerical example
+- Dumping a complete derivation on screen at once without progressive reveal
 
 ## base.py Reference
 
@@ -217,6 +351,7 @@ ACCENT = "#f1c40f"
 MUTED = "#7f8c8d"
 CARD_BG = "#16213e"
 SUB_BOX_CLR = "#0d0d1a"
+SHOW_SUBTITLES = False
 import platform as _platform
 _sys = _platform.system()
 FONT = "STKaiti" if _sys == "Darwin" else "SimSun" if _sys == "Windows" else "Noto Sans CJK SC"
@@ -256,22 +391,23 @@ class SubtitleMixin:
             self.pad_segment()
         tts_dur = self._get_seg_duration()
         self._log_timestamp()
-        new_txt = Text(text, font=FONT, font_size=font_size, color=WHITE, line_spacing=1.4)
-        if new_txt.width > 12:
-            new_txt.width = 12
-        box = RoundedRectangle(
-            width=config.frame_width - 0.6, height=new_txt.height + 0.45,
-            corner_radius=0.12, fill_color=SUB_BOX_CLR, fill_opacity=0.82, stroke_width=0,
-        )
-        box.to_edge(DOWN, buff=0.22)
-        new_txt.move_to(box)
-        grp = VGroup(box, new_txt)
-        anims = []
-        if self._sub_group is not None:
-            anims.append(FadeOut(self._sub_group, run_time=0.3))
-        anims.append(FadeIn(grp, run_time=0.4))
-        self.play(*anims)
-        self._sub_group = grp
+        if SHOW_SUBTITLES:
+            new_txt = Text(text, font=FONT, font_size=font_size, color=WHITE, line_spacing=1.4)
+            if new_txt.width > 12:
+                new_txt.width = 12
+            box = RoundedRectangle(
+                width=config.frame_width - 0.6, height=new_txt.height + 0.45,
+                corner_radius=0.12, fill_color=SUB_BOX_CLR, fill_opacity=0.82, stroke_width=0,
+            )
+            box.to_edge(DOWN, buff=0.22)
+            new_txt.move_to(box)
+            grp = VGroup(box, new_txt)
+            anims = []
+            if self._sub_group is not None:
+                anims.append(FadeOut(self._sub_group, run_time=0.3))
+            anims.append(FadeIn(grp, run_time=0.4))
+            self.play(*anims)
+            self._sub_group = grp
         self._seg_start = self.renderer.time
         if tts_dur > 0:
             self._seg_dur = tts_dur
@@ -290,7 +426,7 @@ class SubtitleMixin:
         self._seg_dur = 0
 
     def hide_sub(self):
-        if self._sub_group is not None:
+        if SHOW_SUBTITLES and self._sub_group is not None:
             self.play(FadeOut(self._sub_group, run_time=0.3))
             self._sub_group = None
 
