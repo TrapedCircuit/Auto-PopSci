@@ -38,10 +38,15 @@ latex --version       # For Manim's MathTex (or xelatex)
 
 ### Phase 0 -- Scaffold the project
 
+**Important**: Create the project directory OUTSIDE any existing uv workspace,
+otherwise `uv init` adds it as a workspace member instead of standalone.
+
 ```bash
+mkdir <topic> && cd <topic>
 uv init --name <topic>-animation --python ">=3.11"
 uv add manim==0.20.1 edge-tts
 mkdir animation
+rm -f main.py   # uv init creates a default main.py -- delete it
 ```
 
 Create `animation/base.py` by reading the scaffold file from this skill's directory.
