@@ -15,17 +15,24 @@ Given a topic (e.g. "Zero-Knowledge Proofs"), Auto Pop-Sci guides you through:
 4. **AI narration** -- natural-sounding voice via Microsoft Edge TTS (free, supports 40+ languages)
 5. **Synced final video** -- timestamp-based pipeline ensures audio, video, and subtitles stay perfectly aligned
 
-## Quick Start
+## Install
 
-### As a Cursor Agent Skill
-
-Copy `SKILL.md` to your Cursor skills directory:
+One-command install via the [skills CLI](https://github.com/vercel-labs/skills)
+(works with Cursor, Claude Code, Codex, and 40+ agents):
 
 ```bash
-cp SKILL.md ~/.cursor/skills/auto-pop-sci/SKILL.md
+npx skills add TrapedCircuit/Auto-PopSci
 ```
 
-Then ask Cursor:
+Or install manually:
+
+```bash
+git clone https://github.com/TrapedCircuit/Auto-PopSci.git ~/.cursor/skills/auto-pop-sci
+```
+
+## Quick Start
+
+After installing, ask your agent:
 
 > "Generate a 10-minute science video explaining the Fourier Transform"
 
