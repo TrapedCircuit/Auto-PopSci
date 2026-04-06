@@ -168,12 +168,36 @@ audio track in one ffmpeg call -- zero boundary artifacts.
 
 ## Style Guide (3Blue1Brown)
 
-- Background: `#1a1a2e`, Accent: `#f1c40f` (gold)
-- Success: `#2ecc71`, Fail: `#e74c3c`
-- Primary: `#3498db` (blue), Secondary: `#e67e22` (orange)
-- Math: `MathTex` with color highlights
-- Subtitle: semi-transparent dark box at bottom
-- Transitions: `FadeIn`, `Write`, `Transform`, `ReplacementTransform`
+### Colors
+- Background: `#1a1a2e`, Card bg: `#16213e`, Subtitle bg: `#0d0d1a`
+- Accent: `#f1c40f` (gold), Success: `#2ecc71`, Fail: `#e74c3c`
+- Primary: `#3498db` (blue), Secondary: `#e67e22` (orange), Muted: `#7f8c8d`
+- Assign each key concept its own color and use consistently across scenes
+
+### Math formulas
+- Use `MathTex` with separate strings per sub-expression for color targeting:
+  `MathTex("e", "^{", "i", r"\pi", "}", font_size=72)` then `eq[0].set_color(...)`
+- Use `TransformMatchingTex` for derivation steps (animates matching parts)
+- Frame key results with `SurroundingRectangle(corner_radius=0.12)`
+
+### Layout patterns
+- **Card grid**: `RoundedRectangle` with field tag + symbol + description + separator line
+- **Two-tier**: constants/icons on top row, operations/arrows below, result at bottom
+- **Section titles**: smaller muted text at top, `FadeIn(shift=DOWN*0.15)` entrance
+- **Decorative**: soft glow circles behind hero formulas (low opacity fill + stroke)
+
+### Animation patterns
+- Staggered entrance: `FadeIn(item, shift=UP*0.4)` with `lag_ratio` or loop
+- Emphasis: `scale=0.7` on FadeIn for a "pop" effect
+- Step labels: show before derivation, fade out after
+- Unit circle: `TracedPath` + `always_redraw` for cos/sin projection lines
+- Final reveal: double frame (inner solid + outer faint)
+
+### Things to AVOID
+- `letter_spacing` parameter in `Text()` -- Manim does not support it
+- Raw `\text{}` in `MathTex` for Chinese -- use separate `Text()` objects
+- Overly long `run_time` on `Write()` -- keep under 2.5s for readability
+- Plain text-only scenes -- always add at least one visual element
 
 ## base.py Reference
 
