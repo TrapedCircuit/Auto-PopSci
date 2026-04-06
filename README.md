@@ -24,12 +24,6 @@ One-command install via the [skills CLI](https://github.com/vercel-labs/skills)
 npx skills add TrapedCircuit/Auto-PopSci
 ```
 
-Or install manually:
-
-```bash
-git clone https://github.com/TrapedCircuit/Auto-PopSci.git ~/.cursor/skills/auto-pop-sci
-```
-
 ## Quick Start
 
 After installing, ask your agent:
