@@ -39,13 +39,20 @@ After installing, ask your agent:
 The agent will follow the skill instructions to scaffold the project, write the
 narrative, implement animations, and build the final video.
 
-### Build the Example
+### Build the Examples
 
 ```bash
-cd examples/zero-knowledge-proof
+# Transformer (~5 min)
+cd examples/transformer
 uv sync
 uv run python animation/build_video.py
-open media/final/zkp_full.mp4
+open media/final/transformer_full.mp4
+
+# Lattice Cryptography (~10 min, has 3D visualization)
+cd examples/lattice-crypto
+uv sync
+uv run python animation/build_video.py
+open media/final/output_full.mp4
 ```
 
 ## Parameters
@@ -75,6 +82,18 @@ Auto-PopSci/
       script.md                     # Full narration (~2400 chars)
       animation/
         main.py                     # 14 Manim scenes
+        build_video.py              # Build pipeline
+    transformer/                    # Working example (~5 min video)
+      plan.md                       # Narrative outline
+      script.md                     # Full narration (~1100 chars)
+      animation/
+        main.py                     # 8 Manim scenes
+        build_video.py              # Build pipeline
+    lattice-crypto/                 # Working example (~10 min, has 3D)
+      plan.md                       # Narrative outline
+      script.md                     # Full narration (~2500 chars)
+      animation/
+        main.py                     # 9 scenes (incl. 3D lattice)
         build_video.py              # Build pipeline
   docs/
     sync-architecture.md            # How the audio sync works

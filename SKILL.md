@@ -53,8 +53,8 @@ Create `animation/base.py` by reading the scaffold file from this skill's direct
 The file is at: `<this_skill_directory>/scaffold/animation/base.py`
 To find the skill directory, resolve the path of this SKILL.md file.
 
-If you cannot find the scaffold file, create `animation/base.py` with the content
-shown in the "base.py Reference" section below.
+If you cannot find the scaffold file, copy `animation/base.py` from any
+working example (e.g. `examples/euler-identity/animation/base.py`).
 
 **NEVER regenerate base.py from scratch.** It contains the sync-critical
 `SubtitleMixin` class. Always copy it verbatim.
@@ -90,12 +90,37 @@ Next paragraph.
 [ANIM: next animation]
 ```
 
-### Phase 2.5 -- Self-Review Harness (MANDATORY)
+### Phase 2.5 -- Review Harness (MANDATORY)
 
-Before implementing animations, review the plan and script as if you were a
-**high-school student seeing this topic for the first time**. Apply these checks:
+Before implementing animations, review the plan and script against BOTH
+checklists below. This is the most impactful quality gate -- a boring or
+confusing script cannot be saved by good animations. If any item fails,
+revise `plan.md` and `script.md` before proceeding to Phase 3.
 
-#### Clarity checklist
+#### Pop-sci communication checklist
+
+Score each dimension. For any score below "good", rewrite the offending
+segments before moving on.
+
+1. **Hook strength**: Does the opening create genuine curiosity within 30s?
+   Is there a question, paradox, or surprising fact -- not a textbook intro?
+2. **Analogy quality**: Are analogies vivid, accurate, and grounded in
+   everyday experience? Do they illuminate without oversimplifying?
+3. **Jargon management**: Is every technical term explained before or upon
+   first use? Could a simpler word work? Are there terms that never get used
+   after being introduced?
+4. **Cognitive scaffolding**: Does each concept build on the previous one?
+   Is there a clear ladder from intuition to formalism, with no logical leaps?
+5. **Narrative tension**: Is there an emotional arc? Does the script create
+   "why?" questions and deliver satisfying "aha!" moments?
+6. **Information density**: Is each segment digestible in one breath? More
+   than one new concept per `show_sub()` call is a red flag -- split it.
+7. **Transition flow**: Do segments connect with natural bridges ("But
+   wait...", "So now the question becomes..."), not just topic jumps?
+8. **Closing resonance**: Does the ending tie back to the opening and leave
+   the viewer with a sense of wonder or a new mental model?
+
+#### Animation clarity checklist
 
 1. **Concrete before abstract**: Every formula must be preceded by a concrete
    numerical example. Never show `a·s + e = b` without first showing
@@ -111,14 +136,7 @@ Before implementing animations, review the plan and script as if you were a
 5. **Spatial intuition**: For geometric/algebraic topics, include at least one
    scene with 3D-like visualization (see "3D Visualization" section below).
 
-#### Review questions (answer each before proceeding to Phase 3)
-
-- "Would a 16-year-old understand *why* this step follows from the previous one?"
-- "Is there any formula shown without a concrete worked example first?"
-- "Can I point to the exact animation that makes the key insight *click*?"
-- "Does the video build intuition progressively, or does it jump to conclusions?"
-
-If any answer is "no", revise the script and plan before implementing.
+If any item fails, revise the script and plan before proceeding to Phase 3.
 
 ### Phase 3 -- Implement Manim scenes (animation/main.py)
 
@@ -272,57 +290,30 @@ eq2 = MathTex(r"e^{i\pi}", "=", "(-1)", "+", r"i \cdot 0")
 self.play(TransformMatchingTex(eq1, eq2), run_time=1)
 ```
 
-### Concrete numerical examples
+### Concrete before abstract
 
-For any abstract formula, **always precede it with a worked example**.
+For any abstract formula, **always precede it with a concrete worked example**:
+show specific numbers first, animate each operation, then generalize.
 
 ```python
-# Show the concrete computation FIRST
-self.show_sub("Let's compute a·s step by step")
-a_label = MathTex(r"\vec{a} = (2, 5)", color=LATTICE_CLR)
-s_label = MathTex(r"\vec{s} = (3, 1)", color=ACCENT)
-comp = MathTex("2", r"\times", "3", "+", "5", r"\times", "1", "=", "11")
-# ... animate each part progressively ...
+# FIRST: concrete example with specific numbers
+self.show_sub("Let's see how cosine similarity works")
+comp = MathTex("3", r"\times", "4", "+", "1", r"\times", "2", "=", "14")
+self.play(Write(comp))  # animate step by step
 
-# THEN show the general formula
-self.show_sub("In general, we compute the inner product")
-formula = MathTex(r"\vec{a} \cdot \vec{s} + e = b")
+# THEN: general formula
+self.show_sub("In general, we compute the dot product")
+formula = MathTex(r"\vec{a} \cdot \vec{b} = \sum a_i b_i")
 ```
 
-### 3D visualization
-
-For topics with spatial structure (lattices, vector spaces, manifolds), include
-at least one scene with 3D-like visualization.
+### 3D visualization (spatial topics only)
 
 **NEVER use `ThreeDScene` with `Dot3D`/`Sphere`** -- Cairo renders each sphere
 as a parametric surface; 50+ spheres can OOM or hang for minutes.
 
-Instead, use **oblique projection** in a regular `Scene`:
-
-```python
-def _proj(x, y, z, phi=0.55, theta=-0.7):
-    """Project 3D point to 2D screen coordinates."""
-    cp, sp = np.cos(phi), np.sin(phi)
-    ct, st = np.cos(theta), np.sin(theta)
-    sx = x * ct - y * st
-    sy = x * st * sp + y * ct * sp + z * cp
-    return np.array([sx * 0.65, sy * 0.65, 0])
-
-# Use regular Dots (fast!) at projected positions
-pts = VGroup(*[
-    Dot(_proj(i, j, k), radius=0.05, color=LATTICE_CLR)
-    for i in range(-2, 3) for j in range(-2, 3) for k in range(-1, 2)
-])
-
-# "Rotate" by transforming to a different projection angle
-new_pts = VGroup(*[
-    Dot(_proj(i, j, k, phi=0.45, theta=-1.2), ...)
-    for i, j, k in ...
-])
-self.play(Transform(pts, new_pts, run_time=2))
-```
-
-This renders 100x faster than `ThreeDScene` and produces clean, 3Blue1Brown-style visuals.
+Instead, use **oblique projection** with regular `Dot` in a normal `Scene`.
+See [examples/lattice-crypto/](examples/lattice-crypto/) `S04_Lattice3DScene`
+for a working `_proj()` implementation with camera rotation.
 
 ### Things to AVOID
 - `letter_spacing` parameter in `Text()` -- Manim does not support it
@@ -332,113 +323,6 @@ This renders 100x faster than `ThreeDScene` and produces clean, 3Blue1Brown-styl
 - `ThreeDScene` + `Dot3D`/`Sphere` for many points -- use `_proj()` instead
 - Showing formulas without a preceding concrete numerical example
 - Dumping a complete derivation on screen at once without progressive reveal
-
-## base.py Reference
-
-If you cannot find the scaffold file, create `animation/base.py` with this exact content:
-
-```python
-from manim import *
-import json
-from pathlib import Path
-
-BG = "#1a1a2e"
-PROVER_CLR = "#3498db"
-VERIFIER_CLR = "#e67e22"
-OK_CLR = "#2ecc71"
-FAIL_CLR = "#e74c3c"
-ACCENT = "#f1c40f"
-MUTED = "#7f8c8d"
-CARD_BG = "#16213e"
-SUB_BOX_CLR = "#0d0d1a"
-SHOW_SUBTITLES = False
-import platform as _platform
-_sys = _platform.system()
-FONT = "STKaiti" if _sys == "Darwin" else "SimSun" if _sys == "Windows" else "Noto Sans CJK SC"
-
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_TIMING_PATH = _PROJECT_ROOT / "media" / "timing.json"
-_STAMPS_PATH = _PROJECT_ROOT / "media" / "timestamps.json"
-
-def _load_timing() -> dict:
-    if _TIMING_PATH.exists():
-        return json.loads(_TIMING_PATH.read_text())
-    return {}
-
-_TIMING = _load_timing()
-_STAMPS: dict[str, list[float]] = {}
-
-class SubtitleMixin:
-    _sub_group: VGroup | None = None
-    _sub_idx: int = 0
-    _seg_start: float = 0.0
-    _seg_dur: float = 0.0
-
-    def _get_seg_duration(self) -> float:
-        name = self.__class__.__name__
-        if name in _TIMING and self._sub_idx < len(_TIMING[name]):
-            return _TIMING[name][self._sub_idx]
-        return -1
-
-    def _log_timestamp(self):
-        name = self.__class__.__name__
-        if name not in _STAMPS:
-            _STAMPS[name] = []
-        _STAMPS[name].append(round(self.renderer.time, 4))
-
-    def show_sub(self, text: str, *, font_size: int = 26):
-        if self._seg_dur > 0:
-            self.pad_segment()
-        tts_dur = self._get_seg_duration()
-        self._log_timestamp()
-        if SHOW_SUBTITLES:
-            new_txt = Text(text, font=FONT, font_size=font_size, color=WHITE, line_spacing=1.4)
-            if new_txt.width > 12:
-                new_txt.width = 12
-            box = RoundedRectangle(
-                width=config.frame_width - 0.6, height=new_txt.height + 0.45,
-                corner_radius=0.12, fill_color=SUB_BOX_CLR, fill_opacity=0.82, stroke_width=0,
-            )
-            box.to_edge(DOWN, buff=0.22)
-            new_txt.move_to(box)
-            grp = VGroup(box, new_txt)
-            anims = []
-            if self._sub_group is not None:
-                anims.append(FadeOut(self._sub_group, run_time=0.3))
-            anims.append(FadeIn(grp, run_time=0.4))
-            self.play(*anims)
-            self._sub_group = grp
-        self._seg_start = self.renderer.time
-        if tts_dur > 0:
-            self._seg_dur = tts_dur
-        else:
-            cjk = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
-            self._seg_dur = max(2.0, cjk * 0.22)
-        self._sub_idx += 1
-
-    def pad_segment(self):
-        if self._seg_dur <= 0:
-            return
-        elapsed = self.renderer.time - self._seg_start
-        remaining = self._seg_dur - elapsed
-        if remaining > 0.2:
-            self.wait(remaining)
-        self._seg_dur = 0
-
-    def hide_sub(self):
-        if SHOW_SUBTITLES and self._sub_group is not None:
-            self.play(FadeOut(self._sub_group, run_time=0.3))
-            self._sub_group = None
-
-    def _save_stamps(self):
-        _STAMPS_PATH.write_text(json.dumps(_STAMPS, indent=2))
-
-    def clear_all(self, run_time=0.8):
-        self.pad_segment()
-        self._sub_group = None
-        self.play(*[FadeOut(m) for m in self.mobjects], run_time=run_time)
-        self._save_stamps()
-```
 
 ## Reference
 
