@@ -23,10 +23,10 @@ Naive approaches that **do not work**:
 ## The Solution: 5-Phase Timestamp Pipeline
 
 ```
-Phase 1          Phase 2              Phase 3           Phase 4      Phase 5
-TTS per      ->  Manim render     ->  ffmpeg adelay ->  Concat   ->  SRT
-segment          (reads timing,       (place audio      scenes       from
-                  logs timestamps)     at exact times)               timestamps
+Phase 1          Phase 2              Phase 3            Phase 4             Phase 5
+TTS per      ->  Manim render     ->  Concat silent  ->  ONE-PASS audio  ->  SRT
+segment          (reads timing,       videos (-an)       merge on full       from
+                  logs timestamps)                        timeline            timestamps
 ```
 
 ### Phase 1: Generate TTS per segment
@@ -67,36 +67,49 @@ timestamps to `media/timestamps.json`:
 These timestamps tell us **exactly when** each subtitle appeared in the
 rendered video timeline.
 
-### Phase 3: Place audio at timestamps via ffmpeg
+### Phase 3: Concatenate silent videos
 
-For each scene, we use ffmpeg's `adelay` filter to position each audio
-segment at its logged timestamp, then `amix` to combine them:
+All per-scene Manim videos are concatenated into one silent full video:
 
 ```
-ffmpeg -y -i scene_video.mp4 \
-  -i segment_00.mp3 -i segment_01.mp3 -i segment_02.mp3 \
+ffmpeg -f concat -safe 0 -i concat.txt -c copy -an silent_full.mp4
+```
+
+The `-an` flag strips any audio. `-c copy` avoids re-encoding.
+
+### Phase 4: One-pass audio merge
+
+A single ffmpeg call places ALL audio segments at their **absolute** positions
+on the full video timeline:
+
+```
+ffmpeg -y -i silent_full.mp4 \
+  -i S01_00.mp3 -i S01_01.mp3 -i S02_00.mp3 ... \
   -filter_complex \
     "[1:a]adelay=0|0[d0];
-     [2:a]adelay=3800|3800[d1];
-     [3:a]adelay=19300|19300[d2];
-     [d0][d1][d2]amix=inputs=3:duration=longest:dropout_transition=0,volume=3[aout]" \
+     [2:a]adelay=11033|11033[d1];
+     [3:a]adelay=18567|18567[d2];
+     ...
+     [d0][d1][d2]...amix=inputs=N:duration=longest:dropout_transition=0,volume=N[aout]" \
   -map 0:v -map [aout] \
   -c:v copy -c:a aac -b:a 192k \
-  output_scene.mp4
+  output_full.mp4
 ```
 
 Key details:
-- `adelay` values are in milliseconds, taken from `timestamps.json`
+- `adelay` values are **absolute milliseconds** = scene_offset + local_timestamp
+- Scene offsets are calculated from cumulative per-scene video durations
 - `volume=N` compensates for amix dividing volume by number of inputs
 - `-c:v copy` avoids video re-encoding
+- This produces a **single continuous audio track** with zero boundary artifacts
 
-### Phase 4: Concatenate scenes
+### Why one-pass instead of per-scene merge?
 
-```
-ffmpeg -f concat -safe 0 -i concat.txt -c copy final.mp4
-```
-
-Use `-c copy` (no re-encoding) to prevent any sync drift.
+The old approach (merge audio per-scene, then concat scenes with `-c copy`)
+caused AAC frame discontinuities at scene boundaries. Each scene had its own
+independently-encoded audio stream, and concatenating them created pops,
+clicks, and silence gaps. The one-pass approach avoids this entirely by
+encoding audio only once across the full timeline.
 
 ### Phase 5: Generate SRT
 
@@ -113,7 +126,11 @@ SRT timestamps are computed from:
 2. **Never use `add_sound()`**: Manim's built-in audio embedding is unreliable
    for multiple clips per scene.
 
-3. **Always use `-c copy` for concat**: Re-encoding introduces drift.
+3. **One-pass audio merge**: NEVER merge audio per-scene then concat.
+   Always concat silent videos first, then one ffmpeg call for all audio.
 
 4. **Save timestamps in every scene**: The last scene must explicitly call
    `self._save_stamps()` if it doesn't use `self.clear_all()`.
+
+5. **`show_sub()` is non-blocking**: Animations play DURING narration.
+   Call `pad_segment()` after animations to fill remaining TTS time.

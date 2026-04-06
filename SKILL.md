@@ -131,45 +131,40 @@ and fill in these values:
 - `SRT_DISPLAY`: dict mapping each scene to its subtitle display text
 
 **CRITICAL RULE**: `len(SCENE_SEGMENTS[scene])` MUST equal the number of
-`show_sub()` calls in that scene class. Run the verification step below.
+`show_sub()` calls in that scene class. The template includes `verify_segments()`
+which checks this automatically before building.
 
-### Phase 5 -- Verify segment counts
-
-Before building, verify that segment counts match `show_sub()` counts.
-For each scene class in main.py, count `show_sub` calls and compare with
-`SCENE_SEGMENTS`. If they don't match, the audio WILL desync.
-
-```python
-# Quick check (add to end of build_video.py, run before build)
-import re
-with open("animation/main.py") as f:
-    code = f.read()
-for scene in SCENE_ORDER:
-    n_seg = len(SCENE_SEGMENTS[scene])
-    pattern = rf"class {scene}\b.*?(?=\nclass |\Z)"
-    match = re.search(pattern, code, re.DOTALL)
-    n_sub = match.group().count("show_sub(") if match else 0
-    status = "OK" if n_seg == n_sub else "MISMATCH"
-    print(f"  {scene}: {n_seg} segments, {n_sub} show_sub calls -- {status}")
-```
-
-Fix any mismatches before proceeding.
-
-### Phase 6 -- Build and verify
+### Phase 5 -- Build and verify
 
 ```bash
 uv run python animation/build_video.py
 open media/final/*_full.mp4
 ```
 
+The pipeline runs 5 phases automatically:
+
+```
+Phase 1: Generate TTS per segment → timing.json
+Phase 2: Render Manim scenes (silent video + timestamps.json)
+Phase 3: Concat silent videos into one full video (video-only, -an)
+Phase 4: ONE-PASS audio merge → place ALL segments at absolute timestamps
+         on the full timeline using ffmpeg adelay + amix
+Phase 5: Generate SRT from timestamps
+```
+
+**Why one-pass merge matters**: The old approach (per-scene audio merge then
+concat) caused AAC frame discontinuities at scene boundaries, producing
+audible pops and silence gaps. The new approach creates a single continuous
+audio track in one ffmpeg call -- zero boundary artifacts.
+
 ## Audio-Video Sync Rules (MANDATORY)
 
 1. **NEVER use Manim's `add_sound()`** -- it drops audio clips silently
 2. **TTS per segment** -- one `.mp3` per `show_sub()` call, not per scene
 3. **Timestamp logging** -- `SubtitleMixin._log_timestamp()` records Manim render time
-4. **ffmpeg `adelay`** -- places audio at exact logged positions. Use `volume=N` for amix
-5. **`-c copy` for concat** -- re-encoding causes drift
-6. **Segment count must match** -- mismatches = desync. Always verify (Phase 5)
+4. **One-pass audio merge** -- concat silent videos first, then place ALL audio
+   at absolute timestamps in a single ffmpeg call. NEVER merge per-scene then concat.
+5. **Segment count must match** -- mismatches = desync. `verify_segments()` checks this
 
 ## Style Guide (3Blue1Brown)
 
