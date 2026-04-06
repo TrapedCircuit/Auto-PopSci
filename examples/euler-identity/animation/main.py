@@ -14,6 +14,7 @@ class S01_HookScene(SubtitleMixin, Scene):
         self.show_sub("数学家们投票选出了人类历史上最美丽的公式。\n获胜的不是什么复杂的定理，而是一个极其简洁的等式。")
         title = Text("最美丽的公式", font=FONT, font_size=48, color=ACCENT)
         self.play(Write(title), run_time=1.5)
+        self.pad_segment()
 
         self.show_sub("它只用了五个数字和三种运算，\n却把数学中最重要的五个常数联系在了一起。")
         consts = VGroup(*[
@@ -23,6 +24,7 @@ class S01_HookScene(SubtitleMixin, Scene):
         self.play(FadeOut(title), run_time=0.5)
         for c in consts:
             self.play(FadeIn(c, scale=1.5), run_time=0.4)
+        self.pad_segment()
 
         self.clear_all()
 
@@ -34,7 +36,7 @@ class S02_TitleScene(SubtitleMixin, Scene):
         self.show_sub("这就是欧拉恒等式。")
         eq = MathTex(r"e^{i\pi} + 1 = 0", font_size=72, color=ACCENT)
         self.play(Write(eq), run_time=2.5)
-        self.wait(1)
+        self.pad_segment()
 
         self.clear_all()
 
@@ -65,11 +67,13 @@ class S03_IngredientsScene(SubtitleMixin, Scene):
 
         for card in cards:
             self.play(FadeIn(card, shift=UP * 0.3), run_time=0.5)
+        self.pad_segment()
 
         self.show_sub("这五个数分别来自数学的不同分支，看似毫无关联。\n欧拉恒等式说的是：它们之间存在一个惊人的等式。")
         self.play(cards.animate.scale(0.5).shift(UP * 2), run_time=1)
         eq = MathTex(r"e^{i\pi} + 1 = 0", font_size=48, color=ACCENT)
         self.play(Write(eq), run_time=1.5)
+        self.pad_segment()
 
         self.clear_all()
 
@@ -87,6 +91,7 @@ class S04_ComplexPlaneScene(SubtitleMixin, Scene):
         x_label = MathTex(r"\text{Re}", font_size=22, color=MUTED).next_to(plane.x_axis, RIGHT)
         y_label = MathTex(r"\text{Im}", font_size=22, color=MUTED).next_to(plane.y_axis, UP)
         self.play(Create(plane), Write(x_label), Write(y_label), run_time=1.5)
+        self.pad_segment()
 
         self.show_sub("乘以负一意味着翻转方向。\n乘以i呢？i的平方等于负一，所以乘两次i等于翻转。\n那乘一次i就是旋转九十度。")
         dot1 = Dot(plane.c2p(1, 0), color="#e74c3c", radius=0.12)
@@ -104,11 +109,13 @@ class S04_ComplexPlaneScene(SubtitleMixin, Scene):
         arc2 = Arc(radius=1.0 * plane.x_length / 6, start_angle=PI / 2, angle=PI / 2,
                     color=ACCENT, stroke_width=2).move_arc_center_to(plane.c2p(0, 0))
         self.play(Create(arc2), FadeIn(dot_neg, lbl_neg), run_time=1)
+        self.pad_segment()
 
         self.show_sub("这就是复平面：横轴是实数，纵轴是虚数。\n乘以i就是逆时针旋转九十度。")
         rotate_label = Text("× i = 旋转 90°", font=FONT, font_size=24, color=ACCENT)
         rotate_label.to_edge(DOWN, buff=1.5)
         self.play(Write(rotate_label), run_time=1)
+        self.pad_segment()
 
         self.clear_all()
 
@@ -121,6 +128,7 @@ class S05_EulerFormulaScene(SubtitleMixin, Scene):
         formula = MathTex(r"e^{i\theta} = \cos\theta + i\sin\theta", font_size=44, color=WHITE)
         formula.to_edge(UP, buff=1)
         self.play(Write(formula), run_time=2)
+        self.pad_segment()
 
         self.show_sub("当θ从零开始增大，\ne的iθ次方在复平面的单位圆上移动。\nθ就是旋转的角度。")
         circle = Circle(radius=2, color=MUTED, stroke_width=2)
@@ -135,10 +143,12 @@ class S05_EulerFormulaScene(SubtitleMixin, Scene):
         self.play(Create(circle), FadeIn(dot), run_time=1)
         self.play(angle.animate.set_value(TAU), run_time=4, rate_func=linear)
         dot.remove_updater(dot_updater)
+        self.pad_segment()
 
         self.show_sub("欧拉公式把指数函数和三角函数，\n通过虚数i，完美地统一在了一起。")
         box = SurroundingRectangle(formula, color=ACCENT, buff=0.2, corner_radius=0.1)
         self.play(Create(box), run_time=0.8)
+        self.pad_segment()
 
         self.clear_all()
 
@@ -152,10 +162,10 @@ class S06_PlugInPiScene(SubtitleMixin, Scene):
         eq2 = MathTex(r"= -1 + i \cdot 0", font_size=40, color=WHITE)
         eq3 = MathTex(r"= -1", font_size=40, color=ACCENT)
         eqs = VGroup(eq1, eq2, eq3).arrange(DOWN, buff=0.5).center()
-
         self.play(Write(eq1), run_time=1.5)
         self.play(Write(eq2), run_time=1)
         self.play(Write(eq3), run_time=0.8)
+        self.pad_segment()
 
         self.show_sub("所以e的iπ次方等于负一。\n两边加一，就得到了欧拉恒等式。")
         final = MathTex(r"e^{i\pi} + 1 = 0", font_size=64, color=ACCENT)
@@ -163,6 +173,7 @@ class S06_PlugInPiScene(SubtitleMixin, Scene):
         self.play(Write(final), run_time=2)
         box = SurroundingRectangle(final, color=OK_CLR, buff=0.25, corner_radius=0.12)
         self.play(Create(box), run_time=0.8)
+        self.pad_segment()
 
         self.clear_all()
 
@@ -189,6 +200,7 @@ class S07_BeautyScene(SubtitleMixin, Scene):
         ops = Text("+ , × , ^    →    = 0", font_size=28, color=ACCENT)
         ops.next_to(consts, DOWN, buff=0.8)
         self.play(Write(ops), run_time=1)
+        self.pad_segment()
 
         self.clear_all()
 
@@ -200,9 +212,11 @@ class S08_OutroScene(SubtitleMixin, Scene):
         self.show_sub("简洁即美。\n在数学的世界里，最深刻的真理往往藏在最简单的形式之中。")
         eq = MathTex(r"e^{i\pi} + 1 = 0", font_size=80, color=ACCENT)
         self.play(Write(eq), run_time=2.5)
+        self.pad_segment()
 
         self.show_sub("这就是欧拉恒等式的美。")
         self.wait(1)
+        self.pad_segment()
 
         self.play(*[FadeOut(m) for m in self.mobjects], run_time=2)
         self._save_stamps()

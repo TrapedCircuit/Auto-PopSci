@@ -5,8 +5,24 @@ DO NOT MODIFY this file per-project. It provides:
   - SubtitleMixin: subtitle bar, TTS-driven wait, timestamp logging
   - Shared color palette and constants
 
-Import in your main.py:
-    from base import SubtitleMixin, BG, ACCENT, PROVER_CLR, ...
+Usage in main.py:
+
+    from base import SubtitleMixin, BG, ACCENT, ...
+
+    class S01_HookScene(SubtitleMixin, Scene):
+        def construct(self):
+            self.camera.background_color = BG
+
+            self.show_sub("Narration line 1")   # subtitle appears, audio starts here
+            self.play(Write(title))              # animation plays DURING narration
+            self.play(FadeIn(diagram))           # more animations
+            self.pad_segment()                   # wait for remaining narration time
+
+            self.show_sub("Narration line 2")   # next segment
+            self.play(Transform(a, b))
+            self.pad_segment()
+
+            self.clear_all()
 """
 
 from manim import *
@@ -24,7 +40,6 @@ MUTED = "#7f8c8d"
 CARD_BG = "#16213e"
 SUB_BOX_CLR = "#0d0d1a"
 
-# CJK font selection: STKaiti (macOS), Noto Sans CJK SC (Linux), SimSun (Windows)
 import platform as _platform
 _sys = _platform.system()
 FONT = "STKaiti" if _sys == "Darwin" else "SimSun" if _sys == "Windows" else "Noto Sans CJK SC"
@@ -45,53 +60,46 @@ _TIMING = _load_timing()
 _STAMPS: dict[str, list[float]] = {}
 
 
-# ── SubtitleMixin ───────────────────────────────────────────────────────────
 class SubtitleMixin:
     """
-    Mixin for Manim Scene classes that provides:
-      1. A subtitle bar at the bottom of the screen
-      2. TTS-driven wait times (reads media/timing.json)
-      3. Timestamp logging for audio sync (writes media/timestamps.json)
-
-    Usage:
-        class MyScene(SubtitleMixin, Scene):
-            def construct(self):
-                self.camera.background_color = BG
-                self.show_sub("Narration text")
-                # ... animations ...
-                self.clear_all()
+    Mixin for Manim Scene classes. Provides:
+      1. Subtitle bar at bottom of screen
+      2. Non-blocking show_sub() -- animations play DURING narration
+      3. pad_segment() -- fills remaining time after animations finish
+      4. Timestamp logging for post-render audio placement
     """
 
     _sub_group: VGroup | None = None
     _sub_idx: int = 0
+    _seg_start: float = 0.0
+    _seg_dur: float = 0.0
 
     def _get_seg_duration(self) -> float:
-        """Get TTS duration for the current segment from timing.json."""
         name = self.__class__.__name__
         if name in _TIMING and self._sub_idx < len(_TIMING[name]):
             return _TIMING[name][self._sub_idx]
         return -1
 
     def _log_timestamp(self):
-        """Record the current renderer time for post-render audio placement."""
         name = self.__class__.__name__
         if name not in _STAMPS:
             _STAMPS[name] = []
-        t = self.renderer.time
-        _STAMPS[name].append(round(t, 4))
+        _STAMPS[name].append(round(self.renderer.time, 4))
 
-    def show_sub(self, text: str, *, wait: float = -1, font_size: int = 26):
+    def show_sub(self, text: str, *, font_size: int = 26):
         """
-        Show subtitle text and wait for TTS duration.
+        Show subtitle and mark the start of a narration segment.
+        Does NOT block -- animations after this call play DURING the narration.
+        Call pad_segment() when animations are done to fill remaining time.
+        """
+        # Pad previous segment if caller forgot
+        if self._seg_dur > 0:
+            self.pad_segment()
 
-        Args:
-            text: Subtitle text displayed on screen
-            wait: -1 = auto (use TTS duration), 0 = no wait, >0 = explicit seconds
-            font_size: subtitle font size
-        """
         tts_dur = self._get_seg_duration()
         self._log_timestamp()
 
+        # Build subtitle visual
         new_txt = Text(
             text, font=FONT, font_size=font_size, color=WHITE, line_spacing=1.4,
         )
@@ -115,17 +123,25 @@ class SubtitleMixin:
         self.play(*anims)
         self._sub_group = grp
 
-        if wait == -1:
-            if tts_dur > 0:
-                w = max(0.5, tts_dur - 0.5)
-            else:
-                cjk = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
-                w = max(2.0, cjk * 0.22)
-            self.wait(w)
-        elif wait > 0:
-            self.wait(wait)
+        # Record segment timing for pad_segment
+        self._seg_start = self.renderer.time
+        if tts_dur > 0:
+            self._seg_dur = tts_dur
+        else:
+            cjk = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+            self._seg_dur = max(2.0, cjk * 0.22)
 
         self._sub_idx += 1
+
+    def pad_segment(self):
+        """Wait for the remaining TTS duration after animations have played."""
+        if self._seg_dur <= 0:
+            return
+        elapsed = self.renderer.time - self._seg_start
+        remaining = self._seg_dur - elapsed
+        if remaining > 0.2:
+            self.wait(remaining)
+        self._seg_dur = 0
 
     def hide_sub(self):
         if self._sub_group is not None:
@@ -133,11 +149,10 @@ class SubtitleMixin:
             self._sub_group = None
 
     def _save_stamps(self):
-        """Persist timestamps to disk. Called by clear_all and at end of last scene."""
         _STAMPS_PATH.write_text(json.dumps(_STAMPS, indent=2))
 
     def clear_all(self, run_time=0.8):
-        """Fade out everything and save timestamps."""
+        self.pad_segment()
         self._sub_group = None
         self.play(*[FadeOut(m) for m in self.mobjects], run_time=run_time)
         self._save_stamps()

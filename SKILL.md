@@ -98,19 +98,27 @@ from base import SubtitleMixin, BG, ACCENT, OK_CLR, FAIL_CLR, MUTED, CARD_BG, FO
 class S01_HookScene(SubtitleMixin, Scene):
     def construct(self):
         self.camera.background_color = BG
-        self.show_sub("First narration sentence.")
-        # ... animations ...
+
+        self.show_sub("First narration sentence.")  # NON-BLOCKING
+        self.play(Write(title))                      # plays DURING narration
+        self.play(FadeIn(diagram))
+        self.pad_segment()                           # fill remaining TTS time
+
         self.show_sub("Second narration sentence.")
-        # ... more animations ...
+        self.play(Transform(a, b))
+        self.pad_segment()
+
         self.clear_all()
 ```
 
-Rules:
-- Inherit `(SubtitleMixin, Scene)` -- SubtitleMixin MUST be first
-- One `show_sub()` per narration paragraph from script.md
-- `show_sub` auto-waits for the TTS duration (reads `media/timing.json`)
-- End each scene with `self.clear_all()`
-- For the LAST scene only: if it doesn't call `clear_all()`, call `self._save_stamps()` at the very end
+Key pattern: **show_sub → animations → pad_segment**
+
+- `show_sub()` is NON-BLOCKING. It shows the subtitle, then returns immediately.
+  Animations after it play WHILE the narration audio plays.
+- `pad_segment()` waits for any remaining TTS time after animations finish.
+  If animations took longer than the narration, it does nothing.
+- `clear_all()` auto-calls `pad_segment()` and saves timestamps.
+- For the LAST scene: if it doesn't use `clear_all()`, call `self._save_stamps()`
 
 ### Phase 4 -- Implement the build pipeline (animation/build_video.py)
 
@@ -209,6 +217,8 @@ _STAMPS: dict[str, list[float]] = {}
 class SubtitleMixin:
     _sub_group: VGroup | None = None
     _sub_idx: int = 0
+    _seg_start: float = 0.0
+    _seg_dur: float = 0.0
 
     def _get_seg_duration(self) -> float:
         name = self.__class__.__name__
@@ -222,7 +232,9 @@ class SubtitleMixin:
             _STAMPS[name] = []
         _STAMPS[name].append(round(self.renderer.time, 4))
 
-    def show_sub(self, text: str, *, wait: float = -1, font_size: int = 26):
+    def show_sub(self, text: str, *, font_size: int = 26):
+        if self._seg_dur > 0:
+            self.pad_segment()
         tts_dur = self._get_seg_duration()
         self._log_timestamp()
         new_txt = Text(text, font=FONT, font_size=font_size, color=WHITE, line_spacing=1.4)
@@ -241,16 +253,22 @@ class SubtitleMixin:
         anims.append(FadeIn(grp, run_time=0.4))
         self.play(*anims)
         self._sub_group = grp
-        if wait == -1:
-            if tts_dur > 0:
-                w = max(0.5, tts_dur - 0.5)
-            else:
-                cjk = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
-                w = max(2.0, cjk * 0.22)
-            self.wait(w)
-        elif wait > 0:
-            self.wait(wait)
+        self._seg_start = self.renderer.time
+        if tts_dur > 0:
+            self._seg_dur = tts_dur
+        else:
+            cjk = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+            self._seg_dur = max(2.0, cjk * 0.22)
         self._sub_idx += 1
+
+    def pad_segment(self):
+        if self._seg_dur <= 0:
+            return
+        elapsed = self.renderer.time - self._seg_start
+        remaining = self._seg_dur - elapsed
+        if remaining > 0.2:
+            self.wait(remaining)
+        self._seg_dur = 0
 
     def hide_sub(self):
         if self._sub_group is not None:
@@ -261,6 +279,7 @@ class SubtitleMixin:
         _STAMPS_PATH.write_text(json.dumps(_STAMPS, indent=2))
 
     def clear_all(self, run_time=0.8):
+        self.pad_segment()
         self._sub_group = None
         self.play(*[FadeOut(m) for m in self.mobjects], run_time=run_time)
         self._save_stamps()
