@@ -1,0 +1,10 @@
+[project]
+name = "zkp-animation"
+version = "0.1.0"
+description = "3Blue1Brown-style Manim animation explaining Zero-Knowledge Proofs"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "edge-tts>=7.2.8",
+    "manim>=0.20.1",
+]

@@ -1,0 +1,219 @@
+"""
+Auto Pop-Sci build pipeline -- TEMPLATE.
+
+Replace all {{PLACEHOLDERS}} with your topic-specific values.
+
+Phases:
+  1. Generate TTS per subtitle segment
+  2. Render Manim scenes (writes timestamps.json)
+  3. Build per-scene audio from timestamps
+  4. Concatenate into final video
+  5. Generate SRT subtitles
+"""
+
+import asyncio
+import json
+import subprocess
+from pathlib import Path
+
+import edge_tts
+
+ROOT = Path(__file__).resolve().parent.parent
+MEDIA = ROOT / "media"
+SEG_DIR = MEDIA / "audio" / "segments"
+FINAL_DIR = MEDIA / "final"
+VIDEO_DIR = MEDIA / "videos" / "main" / "1080p60"
+
+VOICE = "{{VOICE}}"  # e.g. "zh-CN-YunxiNeural", "en-US-GuyNeural"
+
+# Scene render order -- must match class names in main.py
+SCENE_ORDER = [
+    # "S01_HookScene",
+    # "S02_TitleScene",
+    # ... add all scene class names here
+]
+
+# TTS narration text per segment.
+# CRITICAL: len(SCENE_SEGMENTS[scene]) MUST == number of show_sub() calls in that scene.
+SCENE_SEGMENTS = {
+    # "S01_HookScene": [
+    #     "First narration segment spoken by TTS.",
+    #     "Second narration segment.",
+    # ],
+}
+
+# Short display text for SRT subtitles (can differ from TTS text).
+SRT_DISPLAY = {
+    # "S01_HookScene": [
+    #     "First subtitle line",
+    #     "Second subtitle line",
+    # ],
+}
+
+
+def get_duration(path) -> float:
+    r = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+         "-of", "json", str(path)], capture_output=True, text=True)
+    try:
+        return float(json.loads(r.stdout)["format"]["duration"])
+    except (KeyError, json.JSONDecodeError):
+        return 2.0
+
+
+async def phase1_generate_tts():
+    print("=== Phase 1: Generate TTS per segment ===")
+    SEG_DIR.mkdir(parents=True, exist_ok=True)
+
+    for scene in SCENE_ORDER:
+        for i, text in enumerate(SCENE_SEGMENTS[scene]):
+            out = SEG_DIR / f"{scene}_{i:02d}.mp3"
+            if not out.exists() or out.stat().st_size < 100:
+                comm = edge_tts.Communicate(text, VOICE, rate="-5%", pitch="+0Hz")
+                await comm.save(str(out))
+                print(f"    {out.name}")
+
+    timing = {}
+    for scene in SCENE_ORDER:
+        durs = []
+        for i in range(len(SCENE_SEGMENTS[scene])):
+            f = SEG_DIR / f"{scene}_{i:02d}.mp3"
+            durs.append(round(get_duration(f), 3))
+        timing[scene] = durs
+        print(f"  {scene}: {len(durs)} segs, {sum(durs):.1f}s")
+
+    (MEDIA / "timing.json").write_text(json.dumps(timing, indent=2))
+    return timing
+
+
+def phase2_render_manim():
+    print("\n=== Phase 2: Render Manim scenes ===")
+    scenes = " ".join(SCENE_ORDER)
+    subprocess.run(
+        f"cd {ROOT} && uv run manim render -qh animation/main.py {scenes}",
+        shell=True, capture_output=True)
+    for s in SCENE_ORDER:
+        p = VIDEO_DIR / f"{s}.mp4"
+        d = get_duration(p) if p.exists() else 0
+        print(f"  {s}: {d:.1f}s")
+
+
+def phase3_build_audio():
+    print("\n=== Phase 3: Build audio tracks ===")
+    stamps_path = MEDIA / "timestamps.json"
+    if not stamps_path.exists():
+        print("  ERROR: timestamps.json not found")
+        return
+    stamps = json.loads(stamps_path.read_text())
+    FINAL_DIR.mkdir(parents=True, exist_ok=True)
+
+    for scene in SCENE_ORDER:
+        if scene not in stamps:
+            print(f"  SKIP {scene}: no timestamps")
+            continue
+        ts_list = stamps[scene]
+        n_segs = len(SCENE_SEGMENTS[scene])
+        vid_path = VIDEO_DIR / f"{scene}.mp4"
+        vid_dur = get_duration(vid_path) if vid_path.exists() else 60
+        n_actual = min(n_segs, len(ts_list))
+        if n_actual == 0:
+            continue
+
+        cmd = ["ffmpeg", "-y", "-i", str(vid_path)]
+        for i in range(n_actual):
+            cmd.extend(["-i", str(SEG_DIR / f"{scene}_{i:02d}.mp3")])
+
+        filter_parts = []
+        for i in range(n_actual):
+            delay_ms = int(ts_list[i] * 1000)
+            filter_parts.append(f"[{i+1}:a]adelay={delay_ms}|{delay_ms}[d{i}]")
+
+        mix_labels = "".join(f"[d{i}]" for i in range(n_actual))
+        filter_parts.append(
+            f"{mix_labels}amix=inputs={n_actual}:duration=longest"
+            f":dropout_transition=0,volume={n_actual}[aout]"
+        )
+
+        out_path = FINAL_DIR / f"{scene}.mp4"
+        cmd.extend([
+            "-filter_complex", ";".join(filter_parts),
+            "-map", "0:v", "-map", "[aout]",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-t", str(vid_dur), str(out_path),
+        ])
+
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"  ERROR {scene}: {r.stderr[-300:]}")
+        else:
+            print(f"  {scene}: {n_actual} segments merged")
+
+
+def phase4_concatenate():
+    print("\n=== Phase 4: Concatenate ===")
+    concat = FINAL_DIR / "concat.txt"
+    lines = []
+    for s in SCENE_ORDER:
+        p = FINAL_DIR / f"{s}.mp4"
+        if p.exists():
+            lines.append(f"file '{p}'")
+    concat.write_text("\n".join(lines))
+
+    output = FINAL_DIR / "output_full.mp4"
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+        "-i", str(concat), "-c", "copy", str(output),
+    ], capture_output=True)
+    dur = get_duration(output)
+    print(f"  Final: {output} ({dur:.1f}s / {dur/60:.1f} min)")
+
+
+def phase5_generate_srt():
+    print("\n=== Phase 5: Generate SRT ===")
+    stamps = json.loads((MEDIA / "timestamps.json").read_text())
+    timing = json.loads((MEDIA / "timing.json").read_text())
+    srt_lines = []
+    idx = 1
+    cumulative = 0.0
+    scene_offsets = {}
+    for s in SCENE_ORDER:
+        scene_offsets[s] = cumulative
+        p = FINAL_DIR / f"{s}.mp4"
+        if p.exists():
+            cumulative += get_duration(p)
+
+    for scene in SCENE_ORDER:
+        if scene not in stamps:
+            continue
+        ts_list = stamps[scene]
+        durs = timing.get(scene, [])
+        display = SRT_DISPLAY.get(scene, [])
+        base = scene_offsets.get(scene, 0)
+        for i in range(min(len(ts_list), len(display), len(durs))):
+            start = base + ts_list[i]
+            end = start + durs[i] - 0.1
+            srt_lines.extend([str(idx), f"{_fmt(start)} --> {_fmt(end)}", display[i], ""])
+            idx += 1
+
+    srt_path = FINAL_DIR / "output_full.srt"
+    srt_path.write_text("\n".join(srt_lines), encoding="utf-8")
+    print(f"  SRT: {srt_path} ({idx - 1} entries)")
+
+
+def _fmt(s: float) -> str:
+    h, m = int(s // 3600), int((s % 3600) // 60)
+    sec, ms = int(s % 60), int((s % 1) * 1000)
+    return f"{h:02d}:{m:02d}:{sec:02d},{ms:03d}"
+
+
+async def main():
+    await phase1_generate_tts()
+    phase2_render_manim()
+    phase3_build_audio()
+    phase4_concatenate()
+    phase5_generate_srt()
+    print("\n=== Done! ===")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

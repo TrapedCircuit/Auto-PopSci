@@ -1,0 +1,8 @@
+__pycache__/
+*.py[oc]
+build/
+dist/
+*.egg-info
+.venv
+media/
+.DS_Store
